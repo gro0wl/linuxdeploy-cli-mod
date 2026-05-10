@@ -942,10 +942,11 @@ extract_ar_deb_field () {
 	tarball=$(ar -t "$pkg" | grep "^control\.tar")
 
 	case "$tarball" in
-		control.tar.gz) cat_cmd=zcat ;;
-		control.tar.xz) cat_cmd=xzcat ;;
-		control.tar)    cat_cmd=cat ;;
-		*) error 1 UNKNOWNCONTROLCOMP "Unknown compression type for %s in %s" "$tarball" "$pkg" ;;
+	control.tar.gz) cat_cmd=zcat ;;
+	control.tar.xz) cat_cmd=xzcat ;;
+	control.tar.zst) cat_cmd=zstdcat ;;
+	control.tar)    cat_cmd=cat ;;
+	*) error 1 UNKNOWNCONTROLCOMP "Unknown compression type for %s in %s" "$tarball" "$pkg" ;;
 	esac
 
 	if in_path $cat_cmd; then
@@ -963,11 +964,12 @@ extract_ar_deb_data () {
 	tarball="$(ar -t "$pkg" | grep "^data.tar")"
 
 	case "$tarball" in
-		data.tar.gz)  cat_cmd=zcat ;;
-		data.tar.bz2) cat_cmd=bzcat ;;
-		data.tar.xz)  cat_cmd=xzcat ;;
-		data.tar)     cat_cmd=cat ;;
-		*) error 1 UNKNOWNDATACOMP "Unknown compression type for %s in %s" "$tarball" "$pkg" ;;
+	data.tar.gz)  cat_cmd=zcat ;;
+	data.tar.bz2) cat_cmd=bzcat ;;
+	data.tar.xz)  cat_cmd=xzcat ;;
+	data.tar.zst) cat_cmd=zstdcat ;;
+	data.tar)     cat_cmd=cat ;;
+	*) error 1 UNKNOWNDATACOMP "Unknown compression type for %s in %s" "$tarball" "$pkg" ;;
 	esac
 
 	if in_path "$cat_cmd"; then
