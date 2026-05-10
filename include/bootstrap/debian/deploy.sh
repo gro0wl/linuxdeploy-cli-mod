@@ -63,7 +63,7 @@ do_install()
     is_archive "${SOURCE_PATH}" && return 0
 
     msg ":: Installing ${COMPONENT} ... "
-    msg ":: LinuxDeployMod bootstrap env 2.6.1-mod2"
+    msg ":: LinuxDeployMod bootstrap env 2.6.1-mod3"
 
     local include_packages="locales,sudo,man-db"
     local exclude_packages="init,systemd-sysv"
@@ -71,7 +71,7 @@ do_install()
 
     if ! (set -e
         DEBOOTSTRAP_DIR="$(component_dir bootstrap/debian)/debootstrap"
-        . "${DEBOOTSTRAP_DIR}/debootstrap" --no-check-gpg --foreign --extractor=ar --arch="${ARCH}" --exclude="${exclude_packages}" --include="${include_packages}" "${SUITE}" "${CHROOT_DIR}" "${SOURCE_PATH}"
+        . "${DEBOOTSTRAP_DIR}/debootstrap" --no-check-gpg --no-merged-usr --foreign --extractor=ar --arch="${ARCH}" --exclude="${exclude_packages}" --include="${include_packages}" "${SUITE}" "${CHROOT_DIR}" "${SOURCE_PATH}"
     exit 0); then
         debootstrap_log
         return 1
@@ -80,7 +80,7 @@ do_install()
     component_exec core/emulator core/mnt core/net
 
     unset DEBOOTSTRAP_DIR
-    if ! chroot_exec /debootstrap/debootstrap --no-check-gpg --second-stage; then
+    if ! chroot_exec /debootstrap/debootstrap --no-check-gpg --no-merged-usr --second-stage; then
         debootstrap_log
         return 1
     fi
