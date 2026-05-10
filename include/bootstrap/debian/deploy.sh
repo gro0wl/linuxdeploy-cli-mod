@@ -49,6 +49,15 @@ apt_repository()
     echo "deb-src ${SOURCE_PATH} ${SUITE} ${components}" >> "${CHROOT_DIR}/etc/apt/sources.list"
 }
 
+debootstrap_log()
+{
+    local log_file="${CHROOT_DIR}/debootstrap/debootstrap.log"
+    [ -e "${log_file}" ] || return 0
+
+    msg "Debootstrap log:"
+    tail -n 40 "${log_file}"
+}
+
 do_install()
 {
     is_archive "${SOURCE_PATH}" && return 0
@@ -59,17 +68,21 @@ do_install()
     local exclude_packages="init,systemd-sysv"
     #selinux_support && include_packages="${include_packages},selinux-basics"
 
-    (set -e
+    if ! (set -e
         DEBOOTSTRAP_DIR="$(component_dir bootstrap/debian)/debootstrap"
         . "${DEBOOTSTRAP_DIR}/debootstrap" --no-check-gpg --foreign --extractor=ar --arch="${ARCH}" --exclude="${exclude_packages}" --include="${include_packages}" "${SUITE}" "${CHROOT_DIR}" "${SOURCE_PATH}"
-    exit 0)
-    is_ok || return 1
+    exit 0); then
+        debootstrap_log
+        return 1
+    fi
 
     component_exec core/emulator core/mnt core/net
 
     unset DEBOOTSTRAP_DIR
-    chroot_exec /debootstrap/debootstrap --no-check-gpg --second-stage
-    is_ok || return 1
+    if ! chroot_exec /debootstrap/debootstrap --no-check-gpg --second-stage; then
+        debootstrap_log
+        return 1
+    fi
 
     msg -n "Updating repository ... "
     apt_repository
