@@ -828,8 +828,19 @@ rootfs_import()
         fi
         is_ok "fail" "done" || return 1
     ;;
+    *zst)
+        msg -n "Importing rootfs from tar.zst archive ... "
+        if [ -e "${rootfs_file}" ]; then
+            zstdcat "${rootfs_file}" | tar x -C "${CHROOT_DIR}"
+        elif [ -z "${rootfs_file##http*}" ]; then
+            wget -q -O - "${rootfs_file}" | zstdcat | tar x -C "${CHROOT_DIR}"
+        else
+            msg "fail"; return 1
+        fi
+        is_ok "fail" "done" || return 1
+    ;;
     *)
-        msg "Incorrect filename, supported only tar, tar.gz, tar.bz2 or tar.xz archives."
+        msg "Incorrect filename, supported only tar, tar.gz, tar.bz2, tar.xz or tar.zst archives."
         return 1
     ;;
     esac
@@ -859,8 +870,13 @@ rootfs_export()
         tar cJvf "${rootfs_file}" --exclude='./dev' --exclude='./sys' --exclude='./proc' -C "${CHROOT_DIR}" . >/dev/null
         is_ok "fail" "done" || return 1
     ;;
+    *zst)
+        msg -n "Exporting rootfs as tar.zst archive ... "
+        tar cvf - --exclude='./dev' --exclude='./sys' --exclude='./proc' -C "${CHROOT_DIR}" . 2>/dev/null | zstd -q -19 -T0 -o "${rootfs_file}" -
+        is_ok "fail" "done" || return 1
+    ;;
     *)
-        msg "Incorrect filename, supported only gz, bz2 or xz archives."
+        msg "Incorrect filename, supported only gz, bz2, xz or zst archives."
         return 1
     ;;
     esac
@@ -929,6 +945,237 @@ container_status()
     done
 }
 
+diagnose_check()
+{
+    local title="$1"; shift
+    msg -n "${title}: "
+    "$@" >/dev/null 2>&1
+    is_ok "fail" "ok"
+}
+
+diagnose_file_tail()
+{
+    local file="$1"
+    local title="$2"
+    if [ -s "${file}" ]; then
+        msg "${title}:"
+        tail -n 40 "${file}" | while read line
+        do
+            msg "${line}"
+        done
+    fi
+}
+
+diagnose_symlink_dir()
+{
+    local dir="$1"
+    [ -d "${dir}" ] || return 1
+    local link="${dir%/}/.linuxdeploy-diag-link"
+    local target="${dir%/}/.linuxdeploy-diag-target"
+    rm -f "${link}" "${target}"
+    touch "${target}" &&
+    ln -s ".linuxdeploy-diag-target" "${link}" &&
+    rm -f "${link}" "${target}"
+}
+
+container_diagnose()
+{
+    msg ":: Linux Deploy Mod diagnostics"
+    msg "Profile: ${PROFILE}"
+    msg "Version: ${VERSION}"
+    msg "Method: ${METHOD}"
+    msg "Distribution: ${DISTRIB}/${SUITE}/${ARCH}"
+    msg "Target: ${TARGET_TYPE} ${TARGET_PATH}"
+    msg "Include: ${INCLUDE}"
+    msg "Desktop: ${DESKTOP}"
+    msg "Graphics: ${GRAPHICS}"
+
+    msg ":: Device"
+    msg "UID: $(id -u 2>/dev/null)"
+    msg "Kernel: $(uname -r)"
+    msg "Machine: $(uname -m)"
+    msg "SELinux: $(selinux_inactive && echo inactive || echo active)"
+    msg "Loop devices: $(loop_support && echo yes || echo no)"
+    msg "binfmt_misc: $(multiarch_support && echo yes || echo no)"
+
+    msg ":: Tools"
+    diagnose_check "busybox" command -v busybox
+    diagnose_check "mount" command -v mount
+    diagnose_check "losetup" command -v losetup
+    diagnose_check "mke2fs" command -v mke2fs
+    diagnose_check "e2fsck" command -v e2fsck
+    diagnose_check "zstd" command -v zstd
+    diagnose_check "zstdcat" command -v zstdcat
+    diagnose_check "tar" command -v tar
+    diagnose_check "wget" command -v wget
+    if command -v mke2fs >/dev/null 2>&1; then
+        msg "mke2fs: $(mke2fs -V 2>&1 | head -n 1)"
+    fi
+
+    msg ":: Storage"
+    local target_dir="${TARGET_PATH%/*}"
+    [ -n "${target_dir}" -a "${target_dir}" != "${TARGET_PATH}" ] || target_dir="."
+    [ -d "${target_dir}" ] || mkdir -p "${target_dir}" 2>/dev/null
+    df -h "${target_dir}" 2>/dev/null | while read line
+    do
+        msg "${line}"
+    done
+    case "${TARGET_PATH}" in
+    /sdcard/*|/storage/emulated/*|${EXTERNAL_STORAGE}/*)
+        msg "Warning: target is on Android shared storage. Use File image on /data/local for modern Ubuntu/Debian."
+    ;;
+    esac
+    if [ "${TARGET_TYPE}" = "directory" ]; then
+        msg -n "Target symlinks: "
+        diagnose_symlink_dir "${TARGET_PATH}" && msg "ok" || msg "fail"
+    fi
+    if container_mounted; then
+        msg -n "Mounted rootfs symlinks: "
+        diagnose_symlink_dir "${CHROOT_DIR}" && msg "ok" || msg "fail"
+    fi
+
+    msg ":: Mounts"
+    local mounted=$(grep "${CHROOT_DIR%/}" /proc/mounts | awk '{print $2}')
+    if [ -n "${mounted}" ]; then
+        echo "${mounted}" | while read line
+        do
+            msg "* ${line}"
+        done
+    else
+        msg "No mounted container parts."
+    fi
+    local loops=$(losetup -a | grep "${TARGET_PATH%/}")
+    [ -n "${loops}" ] && msg "${loops}"
+
+    msg ":: Connection"
+    msg "Device IP: $(ip -4 addr show 2>/dev/null | awk '/inet / && $2 !~ /^127\\./ {print $2}' | cut -d/ -f1 | head -n 1)"
+    msg "SSH: ${SSH_PORT:-22}"
+    msg "XRDP: ${XRDP_PORT:-3389}"
+    msg "VNC display: ${VNC_DISPLAY:-0}"
+
+    msg ":: Recent logs"
+    diagnose_file_tail "${TEMP_DIR}/mke2fs.log" "mke2fs log"
+    diagnose_file_tail "${CHROOT_DIR}/debootstrap/debootstrap.log" "debootstrap log"
+    diagnose_file_tail "${CHROOT_DIR}$(user_home ${USER_NAME})/.xrdp-startwm.log" "XRDP startup log"
+    diagnose_file_tail "${CHROOT_DIR}$(user_home ${USER_NAME})/.xsession-errors" "X session log"
+}
+
+container_repair_desktop()
+{
+    msg ":: Repairing desktop startup files"
+    container_mounted || container_mount || return 1
+    local DO_ACTION='do_configure'
+    component_exec desktop graphics extra/ssh || return 1
+    msg "Desktop startup files were regenerated."
+    msg "Restart the container, then connect again."
+}
+
+preset_source_path()
+{
+    case "${1}:${ARCH}" in
+    ubuntu:arm|ubuntu:arm_64) echo "http://ports.ubuntu.com/ubuntu-ports/" ;;
+    ubuntu:*) echo "http://archive.ubuntu.com/ubuntu/" ;;
+    debian:*) echo "http://ftp.debian.org/debian/" ;;
+    alpine:*) echo "http://dl-cdn.alpinelinux.org/alpine/" ;;
+    *) echo "${SOURCE_PATH}" ;;
+    esac
+}
+
+preset_touch()
+{
+    [ -n "${OPTLST##* $1 *}" ] && OPTLST="${OPTLST}$1 "
+}
+
+preset_set()
+{
+    local key="$1"
+    local val="$2"
+    eval ${key}=\"${val}\"
+    preset_touch "${key}"
+}
+
+preset_apply()
+{
+    local preset="$1"
+    [ -n "${preset}" ] || preset="list"
+    if [ "${preset}" = "list" ]; then
+        msg "Available presets:"
+        msg "  ubuntu-noble-gnome-xrdp"
+        msg "  ubuntu-noble-xfce-xrdp"
+        msg "  debian-trixie-xfce-vnc"
+        msg "  alpine-ssh"
+        return 0
+    fi
+
+    [ -n "${ARCH}" ] || ARCH=$(get_platform)
+    [ -n "${USER_NAME}" ] || USER_NAME="android"
+    [ -n "${USER_PASSWORD}" ] || USER_PASSWORD="changeme"
+    preset_set ARCH "${ARCH}"
+    preset_set USER_NAME "${USER_NAME}"
+    preset_set USER_PASSWORD "${USER_PASSWORD}"
+    preset_set TARGET_TYPE "file"
+    preset_set FS_TYPE "ext4"
+    preset_set LOCALE "${LOCALE:-en_US.UTF-8}"
+    preset_set DNS "${DNS:-8.8.8.8 8.8.4.4}"
+    preset_set PRIVILEGED_USERS "${PRIVILEGED_USERS:-android:aid_inet android:aid_sdcard_rw android:aid_graphics}"
+    preset_set SSH_PORT "${SSH_PORT:-22}"
+    preset_set XRDP_PORT "${XRDP_PORT:-3389}"
+    preset_set VNC_DISPLAY "${VNC_DISPLAY:-0}"
+
+    case "${preset}" in
+    ubuntu-noble-gnome-xrdp)
+        preset_set DISTRIB "ubuntu"
+        preset_set SUITE "noble"
+        preset_set SOURCE_PATH "$(preset_source_path ubuntu)"
+        preset_set TARGET_PATH "/data/local/linux-noble-gnome.img"
+        preset_set DISK_SIZE "20480"
+        preset_set GRAPHICS "xrdp"
+        preset_set DESKTOP "gnome"
+        preset_set INCLUDE "bootstrap desktop graphics extra/ssh"
+    ;;
+    ubuntu-noble-xfce-xrdp)
+        preset_set DISTRIB "ubuntu"
+        preset_set SUITE "noble"
+        preset_set SOURCE_PATH "$(preset_source_path ubuntu)"
+        preset_set TARGET_PATH "/data/local/linux-noble-xfce.img"
+        preset_set DISK_SIZE "12288"
+        preset_set GRAPHICS "xrdp"
+        preset_set DESKTOP "xfce"
+        preset_set INCLUDE "bootstrap desktop graphics extra/ssh"
+    ;;
+    debian-trixie-xfce-vnc)
+        preset_set DISTRIB "debian"
+        preset_set SUITE "trixie"
+        preset_set SOURCE_PATH "$(preset_source_path debian)"
+        preset_set TARGET_PATH "/data/local/linux-trixie-xfce.img"
+        preset_set DISK_SIZE "8192"
+        preset_set GRAPHICS "vnc"
+        preset_set DESKTOP "xfce"
+        preset_set INCLUDE "bootstrap desktop graphics extra/ssh"
+    ;;
+    alpine-ssh)
+        preset_set DISTRIB "alpine"
+        preset_set SUITE "latest-stable"
+        preset_set SOURCE_PATH "$(preset_source_path alpine)"
+        preset_set TARGET_PATH "/data/local/linux-alpine.img"
+        preset_set DISK_SIZE "2048"
+        preset_set GRAPHICS "vnc"
+        preset_set DESKTOP "xterm"
+        preset_set INCLUDE "bootstrap extra/ssh"
+    ;;
+    *)
+        msg "Unknown preset: ${preset}"
+        preset_apply list
+        return 1
+    ;;
+    esac
+
+    params_write "${CONF_FILE}"
+    msg "Preset applied: ${preset}"
+    msg "Profile: ${PROFILE}"
+    msg "Run Install to deploy it."
+}
+
 helper()
 {
 cat <<EOF
@@ -967,6 +1214,9 @@ COMMANDS:
    stop [-u] [NAME ...] - stop all included or only specified components
       -u - unmount the container after stop
    status [NAME ...] - display the status of the container and components
+   diagnose - run environment, storage, tool and desktop log diagnostics
+   repair-desktop - regenerate desktop, graphics and ssh startup files
+   preset [NAME|list] - apply a deployment preset to the current profile
    help [NAME ...] - show this help or help of components
 
 EOF
@@ -1240,6 +1490,15 @@ status)
     else
         container_status
     fi
+;;
+diagnose|diag)
+    container_diagnose
+;;
+repair-desktop|repair)
+    container_repair_desktop
+;;
+preset|presets)
+    preset_apply "$1"
 ;;
 help)
     if [ $# -eq 0 ]; then

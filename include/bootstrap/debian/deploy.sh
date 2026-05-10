@@ -63,7 +63,7 @@ do_install()
     is_archive "${SOURCE_PATH}" && return 0
 
     msg ":: Installing ${COMPONENT} ... "
-    msg ":: LinuxDeployMod bootstrap env 2.6.1-mod6"
+    msg ":: LinuxDeployMod bootstrap env 2.6.1-mod7"
 
     local include_packages="locales,sudo,man-db"
     local exclude_packages="init,systemd-sysv"
