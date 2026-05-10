@@ -989,6 +989,11 @@ container_diagnose()
     msg "Include: ${INCLUDE}"
     msg "Desktop: ${DESKTOP}"
     msg "Graphics: ${GRAPHICS}"
+    if [ -s "${TEMP_DIR}/persistent-start.pid" ]; then
+        msg "Persistent boot PID: $(cat "${TEMP_DIR}/persistent-start.pid")"
+    else
+        msg "Persistent boot PID: not running"
+    fi
 
     msg ":: Device"
     msg "UID: $(id -u 2>/dev/null)"
@@ -1070,6 +1075,102 @@ container_repair_desktop()
     msg "Restart the container, then connect again."
 }
 
+persistent_stop()
+{
+    local lock="${TEMP_DIR}/persistent-start.pid"
+    if [ -s "${lock}" ]; then
+        local pid=$(cat "${lock}")
+        if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+            msg "Stopping persistent boot watchdog (${pid}) ... "
+            kill "${pid}" 2>/dev/null
+        fi
+        rm -f "${lock}"
+    fi
+    container_mounted && container_stop
+    container_mounted && container_umount
+}
+
+persistent_start()
+{
+    local retry_delay=30
+    local watchdog=300
+    local attempts=0
+    local item key val
+    for item in "$@"
+    do
+        key=$(expr "${item}" : '--\([0-9a-z-]\{1,32\}=\{0,1\}\)' | sed 'y/-abcdefghijklmnopqrstuvwxyz/_ABCDEFGHIJKLMNOPQRSTUVWXYZ/')
+        val=$(expr "${item}" : '--[0-9a-z-]\{1,32\}=\(.*\)')
+        case "${key}" in
+        RETRY_DELAY) retry_delay="${val}" ;;
+        WATCHDOG) watchdog="${val}" ;;
+        ATTEMPTS) attempts="${val}" ;;
+        esac
+    done
+    [ -n "${retry_delay}" ] || retry_delay=30
+    [ -n "${watchdog}" ] || watchdog=300
+    [ -n "${attempts}" ] || attempts=0
+
+    local lock="${TEMP_DIR}/persistent-start.pid"
+    if [ -s "${lock}" ]; then
+        local old_pid=$(cat "${lock}")
+        if [ -n "${old_pid}" ] && kill -0 "${old_pid}" 2>/dev/null; then
+            msg "Persistent boot watchdog is already running (${old_pid})."
+            return 0
+        fi
+    fi
+    echo $$ > "${lock}"
+    trap "rm -f '${lock}'" EXIT INT TERM
+
+    msg ":: Persistent boot enabled"
+    msg "Retry delay: ${retry_delay}s"
+    msg "Watchdog interval: ${watchdog}s"
+    msg "Attempts: $([ "${attempts}" -le 0 ] && echo forever || echo "${attempts}")"
+
+    local attempt=1
+    while true
+    do
+        msg ":: Persistent boot attempt ${attempt}"
+        if container_mounted || container_mount; then
+            if container_start; then
+                msg "Persistent boot started successfully."
+                break
+            fi
+        fi
+
+        msg "Persistent boot failed; remounting before retry."
+        container_mounted && container_stop
+        container_mounted && container_umount
+        if [ "${attempts}" -gt 0 ] && [ "${attempt}" -ge "${attempts}" ]; then
+            msg "Persistent boot attempts exhausted."
+            return 1
+        fi
+        attempt=$(expr "${attempt}" + 1)
+        sleep "${retry_delay}"
+    done
+
+    [ "${watchdog}" -gt 0 ] || return 0
+    while true
+    do
+        sleep "${watchdog}"
+        msg ":: Persistent watchdog check"
+        if ! container_mounted; then
+            msg "Container is not mounted; mounting again."
+            container_mount || {
+                msg "Mount failed; retrying later."
+                sleep "${retry_delay}"
+                continue
+            }
+        fi
+        if ! container_start; then
+            msg "Start failed; remounting and retrying."
+            container_mounted && container_stop
+            container_mounted && container_umount
+            sleep "${retry_delay}"
+            container_mount && container_start
+        fi
+    done
+}
+
 preset_source_path()
 {
     case "${1}:${ARCH}" in
@@ -1129,9 +1230,11 @@ preset_apply()
         preset_set SOURCE_PATH "$(preset_source_path ubuntu)"
         preset_set TARGET_PATH "/data/local/linux-noble-gnome.img"
         preset_set DISK_SIZE "20480"
+        preset_set INIT "systemd"
+        preset_set INIT_ASYNC "true"
         preset_set GRAPHICS "xrdp"
         preset_set DESKTOP "gnome"
-        preset_set INCLUDE "bootstrap desktop graphics extra/ssh"
+        preset_set INCLUDE "bootstrap init desktop graphics extra/ssh"
     ;;
     ubuntu-noble-xfce-xrdp)
         preset_set DISTRIB "ubuntu"
@@ -1139,9 +1242,11 @@ preset_apply()
         preset_set SOURCE_PATH "$(preset_source_path ubuntu)"
         preset_set TARGET_PATH "/data/local/linux-noble-xfce.img"
         preset_set DISK_SIZE "12288"
+        preset_set INIT "systemd"
+        preset_set INIT_ASYNC "true"
         preset_set GRAPHICS "xrdp"
         preset_set DESKTOP "xfce"
-        preset_set INCLUDE "bootstrap desktop graphics extra/ssh"
+        preset_set INCLUDE "bootstrap init desktop graphics extra/ssh"
     ;;
     debian-trixie-xfce-vnc)
         preset_set DISTRIB "debian"
@@ -1216,6 +1321,11 @@ COMMANDS:
    status [NAME ...] - display the status of the container and components
    diagnose - run environment, storage, tool and desktop log diagnostics
    repair-desktop - regenerate desktop, graphics and ssh startup files
+   persistent-start [OPTIONS] - boot, remount and watchdog-restart the container
+      --retry-delay=N - delay between failed boot attempts, default 30 seconds
+      --watchdog=N - watchdog interval, default 300 seconds; 0 disables watchdog
+      --attempts=N - number of boot attempts, default 0 means forever
+   persistent-stop - stop persistent watchdog, services and mounts
    preset [NAME|list] - apply a deployment preset to the current profile
    help [NAME ...] - show this help or help of components
 
@@ -1496,6 +1606,12 @@ diagnose|diag)
 ;;
 repair-desktop|repair)
     container_repair_desktop
+;;
+persistent-start|persist-start)
+    persistent_start "$@"
+;;
+persistent-stop|persist-stop)
+    persistent_stop
 ;;
 preset|presets)
     preset_apply "$1"
