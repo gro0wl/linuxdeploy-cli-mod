@@ -44,8 +44,8 @@ rootfs_make()
             local available_size=$(stat -c %a -f "${TARGET_PATH%/*}")
             let available_size="${block_size}*${available_size}+${file_size}"
             let DISK_SIZE="(${available_size}-${available_size}/10)/1048576"
-            if [ "${DISK_SIZE}" -gt 2047 ]; then
-                DISK_SIZE=2047
+            if [ "${DISK_SIZE}" -gt 8192 ]; then
+                DISK_SIZE=8192
             fi
             if [ "${DISK_SIZE}" -lt 512 ]; then
                 DISK_SIZE=512
@@ -113,6 +113,19 @@ do_install()
 
     rootfs_make || return 1
     container_mount || return 1
+
+    msg -n "Checking symlink support ... "
+    local symlink_test="${CHROOT_DIR}/.linuxdeploy-symlink-test"
+    rm -f "${symlink_test}" "${symlink_test}.target"
+    touch "${symlink_test}.target" &&
+    ln -s ".linuxdeploy-symlink-test.target" "${symlink_test}" &&
+    rm -f "${symlink_test}" "${symlink_test}.target"
+    is_ok "fail" "done" || {
+        msg "The selected installation target does not support symbolic links."
+        msg "Use a real Linux filesystem target: File image with ext4 on /data/local, a Linux partition, or tmpfs RAM."
+        msg "Modern Ubuntu/Debian cannot be installed to FAT/exFAT/FUSE/sdcard-style directories."
+        return 1
+    }
 
     if is_archive "${SOURCE_PATH}" ; then
         rootfs_import "${SOURCE_PATH}"
