@@ -69,13 +69,26 @@ rootfs_make()
         fi
         # for replace busybox mke2fs
         local makefs=$(which mke2fs)
-        if [ -n "${makefs}" ] && ${makefs} -V 2>/dev/null ; then
+        if [ -n "${makefs}" ] && ${makefs} -V >/dev/null 2>&1 ; then
             makefs="${makefs} -q -FFF -t ${FS_TYPE}"
         else
             makefs="mke2fs -q -FFF"
         fi
-        ${makefs} "${TARGET_PATH}" >/dev/null
-        is_ok "fail" "done" || return 1
+        local makefs_log="${TEMP_DIR}/mke2fs.log"
+        rm -f "${makefs_log}"
+        ${makefs} "${TARGET_PATH}" >"${makefs_log}" 2>&1
+        local makefs_status=$?
+        if [ "${makefs_status}" -eq 0 ]; then
+            msg "done"
+        else
+            msg "fail"
+            msg "mke2fs command: ${makefs} ${TARGET_PATH}"
+            if [ -s "${makefs_log}" ]; then
+                msg "mke2fs log:"
+                tail -n 20 "${makefs_log}" | while read line; do msg "${line}"; done
+            fi
+            return 1
+        fi
     fi
 
     if [ "${TARGET_TYPE}" = "directory" ]; then
