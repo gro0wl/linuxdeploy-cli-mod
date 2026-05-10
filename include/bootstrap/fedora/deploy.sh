@@ -2,8 +2,7 @@
 # Linux Deploy Component
 # (c) Anton Skshidlevsky <meefik@gmail.com>, GPLv3
 
-# 31 doesn't support while rpm2cpio in busybox doesn't support zstd
-[ -n "${SUITE}" ] || SUITE="30"
+[ -n "${SUITE}" ] || SUITE="44"
 
 if [ -z "${ARCH}" ]
 then
@@ -116,7 +115,7 @@ cat <<EOF
      Architecture of Linux distribution, supported "armhfp", "aarch64", "i386" and "x86_64".
 
    --suite="${SUITE}"
-     Version of Linux distribution, supported version "28".
+     Version of Linux distribution, supported versions "44", "43", "42", "41", "40" and "30".
 
    --source-path="${SOURCE_PATH}"
      Installation source, can specify address of the repository or path to the rootfs archive.

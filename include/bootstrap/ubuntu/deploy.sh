@@ -2,7 +2,7 @@
 # Linux Deploy Component
 # (c) Anton Skshidlevsky <meefik@gmail.com>, GPLv3
 
-[ -n "${SUITE}" ] || SUITE="xenial"
+[ -n "${SUITE}" ] || SUITE="resolute"
 
 if [ -z "${ARCH}" ]
 then
@@ -47,7 +47,7 @@ cat <<EOF
      Architecture of Linux distribution, supported "armel", "armhf", "arm64", "i386" and "amd64".
 
    --suite="${SUITE}"
-     Version of Linux distribution, supported versions "precise", "trusty", "xenial" and "bionic".
+     Version of Linux distribution, supported versions "resolute", "questing", "noble", "jammy", "focal" and "bionic".
 
    --source-path="${SOURCE_PATH}"
      Installation source, can specify address of the repository or path to the rootfs archive.

@@ -2,7 +2,7 @@
 # Linux Deploy Component
 # (c) Anton Skshidlevsky <meefik@gmail.com>, GPLv3
 
-[ -n "${SUITE}" ] || SUITE="jessie"
+[ -n "${SUITE}" ] || SUITE="trixie"
 
 if [ -z "${ARCH}" ]
 then
@@ -39,8 +39,14 @@ apt_repository()
     # Fix for seccomp policy
     echo 'apt::sandbox::seccomp "false";' > "${CHROOT_DIR}/etc/apt/apt.conf.d/999seccomp-off"
     # Update sources.list
-    echo "deb ${SOURCE_PATH} ${SUITE} main contrib non-free" > "${CHROOT_DIR}/etc/apt/sources.list"
-    echo "deb-src ${SOURCE_PATH} ${SUITE} main contrib non-free" >> "${CHROOT_DIR}/etc/apt/sources.list"
+    local components="main contrib non-free"
+    case "${SUITE}" in
+    stable|oldstable|testing|unstable|trixie|forky|bookworm)
+        components="${components} non-free-firmware"
+    ;;
+    esac
+    echo "deb ${SOURCE_PATH} ${SUITE} ${components}" > "${CHROOT_DIR}/etc/apt/sources.list"
+    echo "deb-src ${SOURCE_PATH} ${SUITE} ${components}" >> "${CHROOT_DIR}/etc/apt/sources.list"
 }
 
 do_install()
@@ -85,7 +91,7 @@ cat <<EOF
      Architecture of Linux distribution, supported "armel", "armhf", "arm64", "i386" and "amd64".
 
    --suite="${SUITE}"
-     Version of Linux distribution, supported versions "jessie", "stretch" and "buster" (also can be used "stable", "testing", "unstable" or "oldstable").
+     Version of Linux distribution, supported versions "trixie", "bookworm", "bullseye" and "buster" (also can be used "stable", "testing", "unstable", "oldstable" or "oldoldstable").
 
    --source-path="${SOURCE_PATH}"
      Installation source, can specify address of the repository or path to the rootfs archive.

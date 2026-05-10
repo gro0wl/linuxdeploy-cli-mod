@@ -2,7 +2,7 @@
 # Linux Deploy Component
 # (c) Anton Skshidlevsky <meefik@gmail.com>, GPLv3
 
-[ -n "${SUITE}" ] || SUITE="14.2"
+[ -n "${SUITE}" ] || SUITE="15.0"
 
 if [ -z "${ARCH}" ]
 then
@@ -129,7 +129,7 @@ cat <<EOF
      Architecture of Linux distribution, supported "arm", "x86", "x86_64".
 
    --suite="${SUITE}"
-     Version of Linux distribution, supported version "14.2".
+     Version of Linux distribution, supported versions "15.0", "current" and "14.2".
 
    --source-path="${SOURCE_PATH}"
      Installation source, can specify address of the repository or path to the rootfs archive.
