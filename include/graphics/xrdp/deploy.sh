@@ -40,9 +40,24 @@ do_configure()
 
     cat > "${xrdp_dir}/startwm.sh" <<EOF
 #!/bin/sh
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 unset DBUS_SESSION_BUS_ADDRESS
 unset XDG_RUNTIME_DIR
-exec ~/.xsession
+
+exec >>"\${HOME}/.xrdp-startwm.log" 2>&1
+echo "Starting XRDP session: \$(date)"
+echo "USER=\${USER} HOME=\${HOME} DISPLAY=\${DISPLAY}"
+
+if [ -x "\${HOME}/.xinitrc" ]; then
+    exec "\${HOME}/.xinitrc"
+fi
+
+if [ -r "\${HOME}/.xsession" ]; then
+    . "\${HOME}/.xsession"
+    exit \$?
+fi
+
+exec xterm
 EOF
     chmod 755 "${xrdp_dir}/startwm.sh"
     return 0
